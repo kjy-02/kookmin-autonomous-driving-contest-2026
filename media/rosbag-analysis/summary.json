@@ -1,0 +1,137 @@
+{
+  "lane": {
+    "output": "media/rosbag-analysis/lane-detection-replay.png",
+    "source": "로스백 데이터들/rosbag/run_03_slow/run_03_slow_0.db3",
+    "topic": "/final_drive/camera_lane_state",
+    "frames": [
+      {
+        "index": 304,
+        "timestamp_ns": 1787370293991649699,
+        "state": [
+          1.0,
+          121.0,
+          481.0,
+          301.0,
+          360.0
+        ]
+      },
+      {
+        "index": 494,
+        "timestamp_ns": 1787370300262438726,
+        "state": [
+          1.0,
+          123.0,
+          475.0,
+          299.0,
+          352.0
+        ]
+      },
+      {
+        "index": 646,
+        "timestamp_ns": 1787370305277265826,
+        "state": [
+          1.0,
+          118.0,
+          476.0,
+          297.0,
+          358.0
+        ]
+      }
+    ]
+  },
+  "traffic_light": {
+    "output": "media/rosbag-analysis/traffic-light-detection-replay.png",
+    "model": "final_drive/final_drive/models/traffic_housing_v2_best.onnx",
+    "sampling_stride": 6,
+    "frames": [
+      {
+        "source": "로스백 데이터들/traffic_rosbag/traffic_red_03/traffic_red_03_0.db3",
+        "frame": 186,
+        "state": "RED",
+        "housing_confidence": 0.9584,
+        "state_confidence": 1.0,
+        "slot_brightness": [
+          255.0,
+          168.13,
+          165.82,
+          162.72
+        ]
+      },
+      {
+        "source": "로스백 데이터들/traffic_rosbag/traffic_yellow_03/traffic_yellow_03_0.db3",
+        "frame": 144,
+        "state": "YELLOW",
+        "housing_confidence": 0.947,
+        "state_confidence": 1.0,
+        "slot_brightness": [
+          161.26,
+          255.0,
+          143.81,
+          158.14
+        ]
+      },
+      {
+        "source": "로스백 데이터들/traffic_rosbag/traffic_green_03/traffic_green_03_0.db3",
+        "frame": 330,
+        "state": "GREEN",
+        "housing_confidence": 0.9709,
+        "state_confidence": 1.0,
+        "slot_brightness": [
+          183.64,
+          177.95,
+          179.7,
+          255.0
+        ]
+      },
+      {
+        "source": "로스백 데이터들/traffic_rosbag/traffic_leftgreen_03/traffic_leftgreen_03_0.db3",
+        "frame": 168,
+        "state": "GREEN + LEFT",
+        "housing_confidence": 0.923,
+        "state_confidence": 0.9143,
+        "slot_brightness": [
+          149.16,
+          147.43,
+          255.0,
+          255.0
+        ]
+      }
+    ]
+  },
+  "cones": {
+    "output": "media/rosbag-analysis/lidar-cone-detection-replay.png",
+    "source": "로스백 데이터들/analysis/cone_visualization_data.json",
+    "run": "03",
+    "frames": [
+      {
+        "index": 95,
+        "time_sec": 9.847,
+        "status": "BOTH",
+        "angle": -70.0,
+        "speed": 5.0,
+        "cone_count": 5
+      },
+      {
+        "index": 47,
+        "time_sec": 4.882,
+        "status": "BOTH",
+        "angle": 0.0,
+        "speed": 5.0,
+        "cone_count": 5
+      },
+      {
+        "index": 117,
+        "time_sec": 12.133,
+        "status": "BOTH",
+        "angle": 25.0,
+        "speed": 5.0,
+        "cone_count": 5
+      }
+    ]
+  },
+  "overtake_outputs": [
+    "media/rosbag-analysis/lidar-overtake-frames.png",
+    "media/rosbag-analysis/lidar-overtake-timeline.png"
+  ],
+  "note": "Raw db3 files remain local; outputs are derived evidence for the portfolio."
+}

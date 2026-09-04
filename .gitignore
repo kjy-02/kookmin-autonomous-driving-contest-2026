@@ -23,6 +23,10 @@ traffic_housing_dataset*/
 *.db3-shm
 *.db3-wal
 
+# Local source bags, extracted datasets, and training runs.  Curated evidence
+# generated from this directory is committed under media/rosbag-analysis/.
+/로스백 데이터들/
+
 # Editors and OS files
 .vscode/
 .idea/

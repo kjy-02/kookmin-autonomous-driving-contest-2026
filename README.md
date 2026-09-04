@@ -69,7 +69,6 @@
 | 고정 장애물·방해 차량 | 소형 차량형 군집 검출, 벽 반사 제거, 빈 차선 선택, 제동 후 회피 | 공통 회피 로직으로 구현 |
 | 신호등 경로 선택 | `GREEN_LEFT` 상태까지 구분 | 좌회전 지름길 조향은 미구현, 직진 전략 |
 | 3바퀴·결승선 판정 | 주최 측 통과 감지 장치와 운영자 정지 사용 | 자동 랩 카운트는 미구현 |
-| 별도 자율주차 경기 | SLAM 기반 주차 | 이 저장소 범위 밖 |
 
 ## 시스템 구조
 
@@ -119,6 +118,41 @@ flowchart LR
 
 ROS bag의 이미지 메시지를 직접 읽는 도구, 프레임 단위 뷰어, 신호등 데이터셋 생성기, 오프라인 평가기와 단위 테스트를 함께 보관했습니다. 센서 입력부터 내부 판단 토픽, 최종 모터 명령까지 기록하면 모드 전환 시점과 오인식 원인을 다시 측정할 수 있습니다.
 
+## ROS bag 기반 주행 인식 검증
+
+교내 연습 주행에서 기록한 카메라·LiDAR·제어 토픽을 오프라인으로 다시 읽어, 코드 설명만으로는 확인하기 어려운 실제 인식 결과를 시각화했습니다. 원본 bag은 23개, 약 4.68 GiB이며 GitHub의 파일 크기 제한과 저장소 용량을 고려해 로컬에 보관하고, 재현 스크립트와 검출 결과만 저장소에 포함했습니다. 선정 기준과 원본 토픽은 [ROS bag 분석 기록](docs/rosbag-analysis.md)에 정리했습니다.
+
+### 차선 검출
+
+![ROS bag 카메라 영상과 기록된 차선 위치를 겹친 차선 검출 결과](media/rosbag-analysis/lane-detection-replay.png)
+
+`run_03_slow` 영상에 `/final_drive/camera_lane_state`로 기록된 좌·우 차선 위치와 중심점을 겹쳤습니다. 파란색·노란색 선은 실제 주행 코드와 동일한 ROI, Canny, Hough 설정으로 다시 찾은 후보이고 녹색은 기록된 차선 중심입니다.
+
+### 신호등 검출과 상태 분류
+
+![ROS bag 영상에서 최종 ONNX 모델과 4구 슬롯 분류기로 검출한 신호등 상태](media/rosbag-analysis/traffic-light-detection-replay.png)
+
+최종 `traffic_housing_v2_best.onnx`로 4구 신호등 외함을 찾고, R/Y/L/G 고정 슬롯의 밝기 상위 20% 평균으로 빨강·노랑·녹색·녹색+좌회전 상태를 구분했습니다. 표시된 값은 각 bag에서 6프레임 간격으로 평가한 뒤 기대 상태로 분류된 대표 프레임입니다.
+
+### LiDAR 라바콘 감지와 경로 구성
+
+![LiDAR 점군에서 라바콘 후보와 좌우 열을 구성하고 조향 명령을 만든 결과](media/rosbag-analysis/lidar-cone-detection-replay.png)
+
+회색 점군에서 라바콘 형태를 통과한 후보를 추리고, 시계열 추적 결과를 좌·우 열로 연결한 뒤 중앙 경로를 따라 조향하는 과정을 위에서 본 좌표계로 나타냈습니다.
+
+### 차량형 장애물과 추월 데이터
+
+<table>
+  <tr>
+    <td width="50%"><img src="media/rosbag-analysis/lidar-overtake-frames.png" alt="LiDAR 추월 테스트의 대표 프레임"></td>
+    <td width="50%"><img src="media/rosbag-analysis/lidar-overtake-timeline.png" alt="LiDAR 거리와 조향 및 속도 명령 타임라인"></td>
+  </tr>
+  <tr>
+    <td align="center">LiDAR 대표 프레임</td>
+    <td align="center">거리·조향·속도 타임라인</td>
+  </tr>
+</table>
+
 ## 빌드와 실행
 
 자이카의 `~/xycar_ws/src` 아래에 패키지를 배치한 뒤 실행합니다. 장치 패키지 `xycar_cam`, `xycar_lidar`, `usb_cam`과 차량의 모터 구동 환경이 먼저 준비되어 있어야 합니다.
@@ -146,6 +180,7 @@ ros2 run final_drive keyboard_stop
 ├── README.md                         # 포트폴리오 진입점
 ├── docs/
 │   ├── competition.md               # 공식 경기 규정 요약
+│   ├── rosbag-analysis.md            # 실제 센서 기록 기반 검출 증거
 │   ├── technical-details.md         # 알고리즘·토픽·안전 설계
 │   ├── test-track.md                # 교내 축소 트랙 기록
 │   └── portfolio-checklist.md       # 공개 전 보완 자료
@@ -168,4 +203,4 @@ ros2 run final_drive keyboard_stop
 
 ## 현재 범위와 남은 기록
 
-이 저장소는 실제 소스와 제공 자료를 기준으로 정리했습니다. 팀 구성과 역할, 공식 순위·주행 시간·벌점, 대회 당일 파라미터 기준까지 반영했습니다. 실제 대회 영상과 대회 당일 rosbag, 공개용 maintainer 정보와 라이선스는 아직 포함되지 않았습니다. 공개 포트폴리오로 전환하기 전에 [보완 체크리스트](docs/portfolio-checklist.md)를 확인하세요.
+이 저장소는 실제 소스와 제공 자료를 기준으로 정리했습니다. 팀 구성과 역할, 공식 순위·주행 시간·벌점, 대회 당일 파라미터 기준과 교내 연습 rosbag 기반 검출 결과까지 반영했습니다. 실제 대회 영상과 대회 당일 rosbag, 공개용 maintainer 정보와 라이선스는 아직 포함되지 않았습니다. 공개 포트폴리오로 전환하기 전에 [보완 체크리스트](docs/portfolio-checklist.md)를 확인하세요.
