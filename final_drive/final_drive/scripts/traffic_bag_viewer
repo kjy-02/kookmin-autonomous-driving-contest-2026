@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+
+from final_drive_vision.bag_frame_viewer import main
+
+
+if __name__ == "__main__":
+    main()

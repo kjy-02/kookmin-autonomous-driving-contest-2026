@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# Generated diagnostics and local datasets
+tmp/
+viewer_captures/
+traffic_dataset*/
+traffic_housing_dataset*/
+
+# ROS bag payloads are large and may contain machine-specific data.
+*.db3
+*.db3-shm
+*.db3-wal
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

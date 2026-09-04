@@ -1,0 +1,21 @@
+traffic_vision:
+  ros__parameters:
+    image_topic: /image_raw
+    traffic_topic: /traffic_light_state
+    enable_checkerboard: false
+    checkerboard_topic: /checkerboard_detected
+    checker_process_every_n_frames: 3
+    traffic_filter_window: 5
+    traffic_filter_hits: 2
+    traffic_clear_hits: 2
+    checker_on_hits: 2
+    checker_off_hits: 2
+    roi_left_fraction: 0.15
+    roi_right_fraction: 0.15
+    roi_top_fraction: 0.0
+    roi_bottom_fraction: 0.15
+    traffic_roi_max_y_fraction: 0.50
+    traffic_model_path: ""
+    traffic_model_confidence: 0.35
+    traffic_model_input_size: 640
+    show_debug_window: false

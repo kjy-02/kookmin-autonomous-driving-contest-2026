@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Render YOLO housing boxes and four-slot brightness decisions."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from final_drive_vision.detectors import (
+    TRAFFIC_GREEN,
+    TRAFFIC_GREEN_LEFT,
+    TRAFFIC_NONE,
+    TRAFFIC_RED,
+    TRAFFIC_YELLOW,
+)
+from final_drive_vision.housing_classifier import TrafficHousingStateClassifier
+from final_drive_vision.detectors import DetectionRoi
+from final_drive_vision.traffic_housing_detector import TrafficHousingDetector
+
+
+STATE_NAMES = {
+    TRAFFIC_NONE: "OFF",
+    TRAFFIC_RED: "RED",
+    TRAFFIC_YELLOW: "YELLOW",
+    TRAFFIC_GREEN: "GREEN",
+    TRAFFIC_GREEN_LEFT: "LEFT+GREEN",
+}
+
+
+def parse_prediction(path: Path, image_shape: tuple[int, ...]) -> tuple[tuple[float, ...], float]:
+    rows = [tuple(float(value) for value in line.split()) for line in path.read_text().splitlines()]
+    if not rows:
+        raise ValueError(f"no prediction in {path}")
+    row = max(rows, key=lambda values: values[5])
+    _, center_x, center_y, width, height, confidence = row
+    image_height, image_width = image_shape[:2]
+    box_width = width * image_width
+    box_height = height * image_height
+    bbox = (
+        (center_x - 0.5 * width) * image_width,
+        (center_y - 0.5 * height) * image_height,
+        box_width,
+        box_height,
+    )
+    return bbox, confidence
+
+
+def render_frame(
+    image: np.ndarray,
+    bbox: tuple[float, ...],
+    detector_confidence: float,
+    classifier: TrafficHousingStateClassifier,
+) -> tuple[np.ndarray, list[object]]:
+    result = classifier.classify(image, bbox)
+    canvas = np.full((480, 1040, 3), 28, np.uint8)
+    scaled = cv2.resize(image, (640, 480), interpolation=cv2.INTER_AREA)
+    canvas[:, :640] = scaled
+    scale_x = 640.0 / image.shape[1]
+    scale_y = 480.0 / image.shape[0]
+    x, y, width, height = result.bbox
+    x0, y0 = int(round(x * scale_x)), int(round(y * scale_y))
+    x1 = int(round((x + width) * scale_x))
+    y1 = int(round((y + height) * scale_y))
+    cv2.rectangle(canvas, (x0, y0), (x1, y1), (255, 190, 20), 2)
+
+    state_colors = {
+        TRAFFIC_NONE: (180, 180, 180),
+        TRAFFIC_RED: (40, 40, 255),
+        TRAFFIC_YELLOW: (0, 220, 255),
+        TRAFFIC_GREEN: (50, 220, 50),
+        TRAFFIC_GREEN_LEFT: (255, 210, 40),
+    }
+    state_color = state_colors[result.state]
+    for slot in result.slots:
+        center = (
+            int(round(slot.center[0] * scale_x)),
+            int(round(slot.center[1] * scale_y)),
+        )
+        radius = max(3, int(round(slot.radius * 0.5 * (scale_x + scale_y))))
+        color = state_color if slot.active else (150, 150, 150)
+        cv2.circle(canvas, center, radius, color, 2)
+        cv2.putText(
+            canvas,
+            slot.label,
+            (center[0] - 5, center[1] - radius - 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+
+    cv2.rectangle(canvas, (0, 0), (640, 44), (24, 24, 24), -1)
+    cv2.putText(
+        canvas,
+        f"YOLO housing {detector_confidence:.2f}  ->  {STATE_NAMES[result.state]}",
+        (12, 29),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.70,
+        state_color,
+        2,
+        cv2.LINE_AA,
+    )
+
+    crop_pad_x = int(round(0.12 * width))
+    crop_pad_y = int(round(0.20 * height))
+    crop_x0 = max(0, x - crop_pad_x)
+    crop_y0 = max(0, y - crop_pad_y)
+    crop_x1 = min(image.shape[1], x + width + crop_pad_x)
+    crop_y1 = min(image.shape[0], y + height + crop_pad_y)
+    crop = image[crop_y0:crop_y1, crop_x0:crop_x1]
+    if crop.size:
+        crop_scale = min(360.0 / crop.shape[1], 145.0 / crop.shape[0])
+        crop_view = cv2.resize(
+            crop,
+            (max(1, int(round(crop.shape[1] * crop_scale))), max(1, int(round(crop.shape[0] * crop_scale)))),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        view_y = 38
+        view_x = 660 + (360 - crop_view.shape[1]) // 2
+        canvas[view_y : view_y + crop_view.shape[0], view_x : view_x + crop_view.shape[1]] = crop_view
+
+    cv2.putText(canvas, "4-lamp crop", (660, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (230, 230, 230), 1, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"brightest 20% (V), active >= {classifier.active_bright_mean:.0f}",
+        (660, 222),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (230, 230, 230),
+        1,
+        cv2.LINE_AA,
+    )
+    baseline_y = 410
+    bar_width = 54
+    gap = 30
+    for index, slot in enumerate(result.slots):
+        bar_x = 674 + index * (bar_width + gap)
+        bar_height = int(round(np.clip(slot.bright_mean / 255.0, 0.0, 1.0) * 150.0))
+        color = state_color if slot.active else (125, 125, 125)
+        cv2.rectangle(canvas, (bar_x, baseline_y - bar_height), (bar_x + bar_width, baseline_y), color, -1)
+        cv2.putText(canvas, f"{slot.bright_mean:.0f}", (bar_x + 4, baseline_y - bar_height - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (235, 235, 235), 1, cv2.LINE_AA)
+        cv2.putText(canvas, slot.label, (bar_x + 19, 438), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (235, 235, 235), 2, cv2.LINE_AA)
+    threshold_y = baseline_y - int(round(classifier.active_bright_mean / 255.0 * 150.0))
+    cv2.line(canvas, (660, threshold_y), (1020, threshold_y), (90, 190, 255), 1, cv2.LINE_AA)
+
+    row = [
+        STATE_NAMES[result.state],
+        f"{detector_confidence:.4f}",
+        f"{result.confidence:.4f}",
+        *(f"{slot.bright_mean:.2f}" for slot in result.slots),
+    ]
+    return canvas, row
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--images", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--labels", type=Path)
+    source.add_argument("--model", type=Path)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("frames", nargs="+")
+    args = parser.parse_args()
+    args.output.mkdir(parents=True, exist_ok=True)
+    classifier = TrafficHousingStateClassifier()
+    housing_detector = None
+    if args.model is not None:
+        housing_detector = TrafficHousingDetector(
+            args.model,
+            roi=DetectionRoi(),
+            max_y_fraction=0.50,
+            confidence_threshold=0.35,
+        )
+    rows = []
+    for frame_name in args.frames:
+        image = cv2.imread(str(args.images / f"{frame_name}.jpg"))
+        if image is None:
+            raise FileNotFoundError(args.images / f"{frame_name}.jpg")
+        if housing_detector is not None:
+            detected = housing_detector.detect(image)
+            if detected.bbox is None:
+                raise RuntimeError(f"no housing detected in {frame_name}")
+            bbox = tuple(float(value) for value in detected.bbox)
+            detector_confidence = detected.confidence
+        else:
+            bbox, detector_confidence = parse_prediction(
+                args.labels / f"{frame_name}.txt", image.shape
+            )
+        rendered, values = render_frame(image, bbox, detector_confidence, classifier)
+        cv2.imwrite(str(args.output / f"{frame_name}_slots.jpg"), rendered)
+        rows.append([frame_name, *values])
+    with (args.output / "slot_measurements.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["frame", "state", "housing_conf", "state_conf", "R", "Y", "L", "G"])
+        writer.writerows(rows)
+
+
+if __name__ == "__main__":
+    main()
