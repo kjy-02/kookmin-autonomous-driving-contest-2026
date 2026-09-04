@@ -74,16 +74,16 @@
 
 ```mermaid
 flowchart LR
-    CAM[USB Camera /image_raw] --> LANE[camera_drive<br/>차선 추종]
+    CAM["USB Camera<br/>/image_raw"] --> LANE[camera_drive<br/>차선 추종]
     CAM --> TL[traffic_vision<br/>신호등 인식]
-    LIDAR[2D LiDAR /scan] --> LANE
+    LIDAR["2D LiDAR<br/>/scan"] --> LANE
     LIDAR --> CONE[cone_drive<br/>라바콘 주행]
     LIDAR --> SUP[drive_supervisor]
     KEY[keyboard_stop<br/>STOP/RUN heartbeat] --> SUP
     LANE -->|camera_cmd| SUP
     CONE -->|cone_cmd + lane status| SUP
     TL -->|traffic state| SUP
-    SUP -->|유일한 최종 명령| MOTOR[/xycar_motor]
+    SUP -->|유일한 최종 명령| MOTOR["/xycar_motor"]
 ```
 
 두 주행 노드는 센서를 계속 처리하지만 실제 모터 토픽은 `drive_supervisor`만 발행합니다. 감독기는 CAMERA↔CONE 모드 전환과 출력 완화뿐 아니라 다음 조건에서 즉시 속도를 0으로 덮어씁니다.
