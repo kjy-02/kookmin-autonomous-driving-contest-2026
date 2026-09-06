@@ -32,6 +32,8 @@ traffic_housing_dataset*/
 # Publish only visualization PNGs from the local bag-analysis workflow.
 /media/rosbag-analysis/*
 !/media/rosbag-analysis/*.png
+/media/rosbag-analysis/lidar-overtake-frames.png
+/media/rosbag-analysis/lidar-overtake-timeline.png
 /tools/generate_rosbag_visuals.py
 /docs/rosbag-analysis.md
 
