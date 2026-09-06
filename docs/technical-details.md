@@ -1,5 +1,7 @@
 # `final_drive` 기술 상세
 
+아래 설명은 [`final_drive.launch.py`](../final_drive/final_drive/launch/final_drive.launch.py)의 통합 실행 설정을 기준으로 합니다. 런치에서 지정하지 않은 값은 각 노드의 기본값을 사용합니다. 속도 수치는 차량에 전달하는 명령값이며 m/s 측정값이 아닙니다.
+
 ## 설계 목표
 
 본선 미션별 알고리즘을 독립적으로 개발하면서도, 실제 모터 명령의 소유권은 하나의 안전 감독기에 모으는 것이 핵심입니다. `camera_drive`와 `cone_drive`는 각자의 후보 명령만 만들고, `drive_supervisor`가 센서 상태·신호등·키보드 제어·현재 모드에 따라 최종 명령을 선택합니다.
@@ -12,7 +14,9 @@
 | `final_cone_drive` | `/scan` | `/final_drive/cone_cmd`, `/final_drive/cone_lane_status` | 라바콘 인식과 중앙 경로 추종 |
 | `traffic_vision` | `/image_raw` | `/traffic_light_state` | 신호등 외함 검출과 R/Y/L/G 상태 분류 |
 | `keyboard_stop` | 터미널 입력 | `/final_drive/manual_stop` | STOP/RUN 명령과 heartbeat |
-| `final_drive_supervisor` | 위 후보 명령·상태, `/scan`, `/traffic_light_state`, `/final_drive/manual_stop` | `/xycar_motor`, `/final_drive/mode`, `/final_drive/traffic_state`, `/final_drive/cone_status`, `/final_drive/manual_stop_state` | 모드 전환, 우선순위, timeout, 출력 제한 |
+| `final_drive_supervisor` | 위 후보 명령·상태, `/scan`, `/traffic_light_state`, `/final_drive/manual_stop` | `/xycar_motor`, `/final_drive/mode`, `/final_drive/traffic_state`, `/final_drive/cone_status`, `/final_drive/manual_stop_state`, `/final_drive/overtake_lidar_ignore` | 모드 전환, 우선순위, timeout, 출력 제한 |
+
+`cone_drive`의 원래 출력 `/xycar_motor`는 통합 런치에서 `/final_drive/cone_cmd`로 remap됩니다. `cone_drive.launch.py` 단독 실행은 이 감독기 경로를 거치지 않습니다.
 
 ## 1. 카메라 차선 추종
 
@@ -80,7 +84,7 @@
 
 라바콘 주행과 별도로, 카메라 차선 추종 중 LiDAR에서 차량 크기의 전방 군집을 찾습니다.
 
-- 넓은 전방/측면 영역에서 군집을 연결하고 0.48 m보다 긴 군집, 0.50 m보다 긴 연결 요소를 벽으로 제거합니다.
+- 전방 0.01~1.50 m·좌우 0.90 m 영역에서 군집을 연결하고 0.48 m보다 긴 군집, 0.50 m보다 긴 연결 요소를 벽으로 제거합니다.
 - 이후 전방 1.5 m·좌우 0.40 m 영역만 차량 판단에 사용합니다.
 - 한 군집에 5점 이상이 2스캔 연속 나타나야 합니다.
 - CAMERA 모드, 라바콘 접근 아님, 실제 양쪽 차선 2프레임 연속, 직선 주행 속도 17 이상일 때만 진입합니다.
@@ -89,7 +93,7 @@
 - 통합 런치 기준 `-10` 명령으로 0.5초 제동 후 속도 10으로 회피 주행합니다.
 - 원래 장애물 쪽에서 점이 1.5초간 사라지면 정상 추종으로 복귀합니다.
 
-이 로직은 고정된 고장 차량과 느리게 움직이는 방해 차량을 동일한 “소형 차량형 객체”로 다룹니다. 실제 대회 rosbag이 추가되면 두 상황을 분리해 검출 거리·완료 시간을 검증해야 합니다.
+이 로직은 고정된 고장 차량과 느리게 움직이는 방해 차량을 동일한 소형 차량형 객체로 다룹니다. 벽 분석 전방 범위의 런치 입력은 1.30 m이지만, 코드에서 차량 검출 범위 이상으로 보정하므로 실제 적용값은 1.50 m입니다.
 
 ## 5. 감독기와 fail-safe
 
@@ -120,19 +124,4 @@
 
 ## 6. 데이터와 검증 도구
 
-- `bag_reader.py`: ROS 2 sqlite bag의 raw/compressed 이미지 CDR 디코딩
-- `bag_frame_viewer.py`: 프레임 탐색, 상태·ROI·검출 상자 시각화
-- `prepare_traffic_dataset.py`: 초기 5클래스 YOLO 데이터셋 생성
-- `prepare_traffic_housing_dataset.py`: 단일 외함 클래스 v2 데이터셋 생성
-- `offline_evaluate.py`: rosbag별 신호 상태 오프라인 평가
-- `scripts/lidar_cone_inspector.py`: 라바콘 LiDAR 분석 보조 도구
-- `test/`: bag 디코딩, ROI, temporal filter, YOLO 출력 형상, 슬롯 분류, 데이터셋 규칙 테스트
-
-모델 파일과 입출력 명세는 [`models/README.md`](../final_drive/final_drive/models/README.md)에 기록되어 있습니다.
-
-## 알려진 한계
-
-- `GREEN_LEFT` 인식 후 전용 좌회전 경로 계획은 없습니다.
-- 랩 카운트, 결승선 검출과 자동 종료는 통합 런치에서 사용하지 않습니다.
-- 체크무늬 검출 코드는 보존했지만 실시간 부하를 줄이기 위해 비활성화했습니다.
-- 제공된 단위 테스트는 Python/OpenCV 환경에서 실행할 수 있지만, 최종 C++ 노드의 검증에는 ROS 2 Humble과 실제/재생 센서 토픽이 필요합니다.
+최종 ONNX 모델용 도구와 초기 OpenCV 실험용 도구는 구분해서 사용합니다. 실행 명령과 테스트 범위는 [패키지 사용 문서](../final_drive/final_drive/README.md), 모델 입출력 명세는 [모델 문서](../final_drive/final_drive/models/README.md)를 참고하세요.

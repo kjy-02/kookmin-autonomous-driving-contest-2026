@@ -1,8 +1,8 @@
-# 국민대 자율주행 경진대회 2026 - ROS 2 자율주행 시스템
+# 321고 | 2026 국민대학교 자율주행 경진대회
 
 국민대 자율주행 경진대회 제9회 본선 미션을 수행하기 위해 제작한 자이카(Xycar Y) 기반 ROS 2 패키지입니다. 카메라 차선 추종과 신호등 인식, 2D LiDAR 라바콘 주행과 차량형 장애물 회피, 최종 모터 명령을 관리하는 안전 감독기를 하나의 실행 흐름으로 통합했습니다.
 
-> 실제 대회일 주행 영상은 추후 추가할 예정입니다. 추가 위치와 권장 메타데이터는 [대회 영상 추가 가이드](media/README.md)에 정리했습니다.
+대회 결과와 팀 기여, 주요 알고리즘, 센서 기록 기반 인식 결과를 정리한 저장소입니다. 실제 대회 주행 영상은 [영상 자료](media/README.md)에 추후 추가합니다.
 
 ## 프로젝트 한눈에 보기
 
@@ -30,7 +30,7 @@
 | 차선 이탈 후 차량 원위치 조치 | 1회 | 5초 |
 | **합계** |  | **21초** |
 
-대회 당일에는 별도 파라미터 override 없이 [`final_drive.launch.py`](final_drive/final_drive/launch/final_drive.launch.py)에 기록된 값으로 전체 시스템을 실행했습니다.
+대회 당일에는 별도 파라미터 변경 없이 [`final_drive.launch.py`](final_drive/final_drive/launch/final_drive.launch.py)의 설정으로 전체 시스템을 실행했습니다.
 
 ## 팀 구성과 협업
 
@@ -85,7 +85,7 @@ flowchart LR
     SUP -->|유일한 최종 명령| MOTOR["/xycar_motor"]
 ```
 
-두 주행 노드는 센서를 계속 처리하지만 실제 모터 토픽은 `drive_supervisor`만 발행합니다. 감독기는 CAMERA↔CONE 모드 전환과 출력 완화뿐 아니라 다음 조건에서 즉시 속도를 0으로 덮어씁니다.
+통합 런치에서는 두 주행 노드가 후보 명령을 만들고 `drive_supervisor`만 최종 모터 명령을 발행합니다. 감독기는 CAMERA↔CONE 모드 전환과 출력 완화뿐 아니라 다음 조건에서 속도 명령을 0으로 덮어씁니다.
 
 - 키보드 STOP 또는 heartbeat 단절
 - 빨강·노랑 신호 연속 확인
@@ -113,35 +113,31 @@ flowchart LR
 
 직선에서 실제 양쪽 차선이 2프레임 연속 보이고 정상 주행 속도가 확보된 경우에만 회피 진입을 허용합니다. LiDAR의 넓은 영역에서 먼저 긴 벽 반사를 제거한 뒤 좁은 전방 영역의 소형 군집을 2스캔 확인합니다. 0.5초 능동 제동 후 장애물이 없는 차선을 추종하고, 원래 장애물 쪽이 1.5초간 비면 정상 차선 추종으로 복귀합니다.
 
-### 5. 기록 재현과 오프라인 검증
-
-ROS bag의 이미지 메시지를 직접 읽는 도구, 프레임 단위 뷰어, 신호등 데이터셋 생성기, 오프라인 평가기와 단위 테스트를 함께 보관했습니다. 센서 입력부터 내부 판단 토픽, 최종 모터 명령까지 기록하면 모드 전환 시점과 오인식 원인을 다시 측정할 수 있습니다.
-
 ## ROS bag 기반 주행 인식 검증
 
 주행 테스트에서 수집한 센서 기록과 분석 결과를 바탕으로 인식 과정을 시각화했습니다. 아래 이미지는 대표 장면을 보여 주며 전체 주행의 정확도나 성공률을 의미하지 않습니다.
 
 ### 차선 검출
 
-![직선 두 장과 S자 곡선 한 장의 카메라 영상에 기록된 차선 위치를 겹친 검출 결과](media/rosbag-analysis/lane-detection-replay.png)
+![직진, 양쪽 차선이 보이는 코너, 한쪽 차선만 보이는 급격한 코너의 차선 검출 결과](media/rosbag-analysis/lane-detection-replay.png)
 
-왼쪽 두 장은 직선 구간, 오른쪽 한 장은 S자 곡선 구간입니다. 카메라 영상에 가장 가까운 시각의 `/final_drive/camera_lane_state` 기록을 맞춰 좌·우 차선 위치와 중심점을 겹쳤습니다. 파란색·노란색 선은 ROI, Canny, Hough로 다시 찾은 후보이고 녹색은 기록된 차선 중심입니다. 좌·우 위치에는 한쪽 차선이 보이지 않을 때 기준 차폭으로 보완한 추정값이 포함될 수 있습니다.
+왼쪽부터 직진, 양쪽 차선이 보이는 코너, 오른쪽 차선만 보이는 급격한 코너입니다. 카메라 영상과 가까운 시각의 `/final_drive/camera_lane_state`를 맞춰 차선 위치와 중심을 표시했습니다. 마지막 장면의 왼쪽 위치는 검출값이 아니라 380 px 기준 차폭으로 보완한 추정값입니다. 파란색·노란색 선은 ROI·Canny·Hough로 다시 찾은 후보이고, 녹색은 기록된 차선 중심입니다.
 
 ### 신호등 검출과 상태 분류
 
 ![ROS bag 영상에서 최종 ONNX 모델과 4구 슬롯 분류기로 검출한 신호등 상태](media/rosbag-analysis/traffic-light-detection-replay.png)
 
-최종 `traffic_housing_v2_best.onnx`로 4구 신호등 외함을 찾고, R/Y/L/G 고정 슬롯의 밝기 상위 20% 평균으로 빨강·노랑·녹색·녹색+좌회전 상태를 구분했습니다. 표시된 값은 각 bag에서 6프레임 간격으로 평가한 뒤 기대 상태로 분류된 대표 프레임입니다.
+최종 `traffic_housing_v2_best.onnx`로 4구 신호등 외함을 찾고, R/Y/L/G 고정 슬롯의 밝기 상위 20% 평균으로 빨강·노랑·녹색·녹색+좌회전을 구분한 대표 결과입니다. 상자는 외함 검출 위치, 원은 각 신호등 슬롯의 측정 영역을 나타냅니다.
 
 ### LiDAR 라바콘 감지와 경로 구성
 
 ![LiDAR 점군에서 라바콘 후보와 좌우 열을 구성하고 조향 명령을 만든 결과](media/rosbag-analysis/lidar-cone-detection-replay.png)
 
-회색 점군에서 라바콘 형태를 통과한 후보를 추리고, 시계열 추적 결과를 좌·우 열로 연결한 뒤 중앙 경로를 따라 조향하는 과정을 위에서 본 좌표계로 나타냈습니다.
+라바콘 분석 기록을 위에서 본 좌표계로 나타냈습니다. 회색은 LiDAR 점군, 주황색 테두리는 라바콘 후보, 파란색·빨간색은 추적된 좌·우 열, 녹색 화살표는 기록된 조향 명령의 방향입니다.
 
 ## 빌드와 실행
 
-자이카의 `~/xycar_ws/src` 아래에 패키지를 배치한 뒤 실행합니다. 장치 패키지 `xycar_cam`, `xycar_lidar`, `usb_cam`과 차량의 모터 구동 환경이 먼저 준비되어 있어야 합니다.
+저장소의 `final_drive/final_drive/` 디렉터리를 자이카의 `~/xycar_ws/src/final_drive`에 배치합니다. ROS 2 Humble, `usb_cam`, `xycar_lidar`와 차량의 모터 구동 환경이 먼저 준비되어 있어야 합니다.
 
 ```bash
 cd ~/xycar_ws
@@ -157,7 +153,7 @@ source ~/xycar_ws/install/setup.bash
 ros2 run final_drive keyboard_stop
 ```
 
-세부 파라미터, rosbag 재생, 데이터셋 생성 명령은 [패키지 사용 문서](final_drive/final_drive/README.md)를 참고하세요.
+의존성, 진단 도구, 테스트 방법과 단독 실행 시 주의사항은 [패키지 사용 문서](final_drive/final_drive/README.md)를 참고하세요.
 
 ## 저장소 구성
 
@@ -168,7 +164,7 @@ ros2 run final_drive keyboard_stop
 │   ├── competition.md               # 공식 경기 규정 요약
 │   ├── technical-details.md         # 알고리즘·토픽·안전 설계
 │   ├── test-track.md                # 교내 축소 트랙 기록
-│   └── portfolio-checklist.md       # 공개 전 보완 자료
+│   └── portfolio-checklist.md       # 추후 추가할 기록
 ├── media/
 │   ├── README.md                    # 실제 대회 영상 추가 위치
 │   └── rosbag-analysis/             # 차선·신호등·라바콘 시각화
@@ -185,9 +181,3 @@ ros2 run final_drive keyboard_stop
 - [Xycar ROS 2 미니PC Y모델 사용설명서 PDF](<자이카 ROS2-미니PC-Y모델 사용설명서-2026-0704.pdf>)
 - [축소 트랙 1:1 인쇄 PDF](test_track/track_small_1to1.pdf)
 - [축소 트랙 치수도 PDF](test_track/track_small_dimensioned.pdf)
-- [축소 트랙 설치 사진](test_track/KakaoTalk_20260902_120538606.jpg)
-- [축소 트랙 차량 주행 사진](test_track/KakaoTalk_20260902_120538606_01.jpg)
-
-## 현재 범위와 남은 기록
-
-이 저장소는 실제 소스와 제공 자료를 기준으로 정리했습니다. 팀 구성과 역할, 공식 순위·주행 시간·벌점, 대회 당일 파라미터 기준과 센서 기록 기반 시각화 이미지까지 반영했습니다. 실제 대회 영상은 추후 추가합니다. 공개 포트폴리오로 전환하기 전에 [보완 체크리스트](docs/portfolio-checklist.md)를 확인하세요.

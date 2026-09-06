@@ -1,215 +1,109 @@
-# final_drive
+# final_drive 사용 가이드
 
-Single driving package containing camera lane driving, LiDAR cone driving,
-traffic-light perception, an archived optional checkerboard detector, and the
-final motor supervisor. Hardware
-drivers (`xycar_cam` and `xycar_lidar`) remain separate device packages, but no
-driving algorithm depends on `cone_drive` or `traffic_vision` anymore. Vehicle
-overtaking is integrated into the camera driver and is armed only on a
-camera-confirmed straight.
+카메라 차선 추종, LiDAR 라바콘 주행, 신호등 인식, 차량형 장애물 회피를 통합한 ROS 2 패키지입니다. 알고리즘과 토픽 구조는 [기술 상세](../../docs/technical-details.md), 대회 결과와 시각화는 [프로젝트 README](../../README.md)에 정리했습니다.
 
-The former `cone_drive` and `traffic_vision` source folders are retained only
-as migration backups and contain `COLCON_IGNORE`. Build, launch, and maintain
-`final_drive` only.
+## 환경과 빌드
 
-## Command flow
+- 차량 환경: Xycar Y, Ubuntu 22.04, ROS 2 Humble
+- 빌드: C++17, `ament_cmake`, `ament_cmake_python`, OpenCV, `cv_bridge`
+- Python: `rclpy`, NumPy, OpenCV
+- 장치: 통합 런치는 `usb_cam`과 `xycar_lidar`를 사용합니다. 카메라·신호등 단독 런치에는 `xycar_cam`도 필요합니다.
+- 차량의 모터 구동 환경과 카메라·LiDAR 장치 설정은 별도로 준비해야 합니다.
 
-```text
-camera_drive  -> /final_drive/camera_cmd --+
-             <- /scan (compact vehicle / long-wall filtering)
-                                            +-> drive_supervisor -> /xycar_motor
-cone_drive    -> /final_drive/cone_cmd -----+
-              -> /final_drive/cone_lane_status (TRACK/RECOVERY/STOP)
-/scan         -> drive_supervisor ----------+ (early entrance guard)
-/image_raw    -> traffic_vision -> /traffic_light_state
-                                  -> drive_supervisor (global stop override)
+이 디렉터리를 `~/xycar_ws/src/final_drive`에 배치한 뒤 차량에서 빌드합니다.
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/xycar_ws
+colcon build --symlink-install --packages-select final_drive
+source install/setup.bash
 ```
 
-Both driving nodes keep processing their sensors, but neither can publish the
-real motor topic directly. `drive_supervisor` is the only `/xycar_motor`
-publisher.
+## 통합 주행
 
-## Straight-course vehicle overtaking
+첫 번째 터미널에서 전체 시스템을 실행합니다.
 
-The camera driver arms overtaking after both real camera lanes are accepted for
-two consecutive image frames. Lane width, lane-center bias, and previous
-steering angle are recorded for diagnosis but do not block entry. Detected
-lane-center changes are now applied immediately without the former 80 px
-two-frame confirmation.
-Overtaking is also blocked while the supervisor reports cone approach/CONE
-mode, so cone-wall returns cannot arm the maneuver.
+```bash
+source ~/xycar_ws/install/setup.bash
+ros2 launch final_drive final_drive.launch.py
+```
 
-Wall classification first uses a wider forward 0.01--1.30 m and lateral
-+/-0.90 m LiDAR region. This preserves the full return from a long wall instead
-of cropping its short intersection with the vehicle ROI. Returns longer than
-the expected 37 x 25 cm target envelope and connected rough wall fragments
-longer than 0.50 m are excluded. Only then are points cropped to the forward
-0.01--1.00 m and lateral +/-0.40 m vehicle ROI. One compact cluster must contain
-at least five points for two consecutive LiDAR scans. A left-side vehicle
-selects the right lane boundary and a right-side vehicle selects the left
-boundary. The driver requests `-10` active braking for 0.5 seconds, follows the
-free lane at the integrated launch speed `10`, and returns after the original vehicle side has remained
-clear for 1.5 seconds. Traffic, keyboard, stale-command, and stale-LiDAR stops
-remain higher-priority supervisor overrides.
-
-The first eight fields of `/final_drive/overtake_state` remain
-`[state,side,left_points,right_points,left_min_m,right_min_m,straight,wall_points]`,
-where `state=0/1/2` means normal/braking/overtaking and `side=1/2` means the
-detected vehicle is left/right. Appended fields report the left/right scan
-confirmation counts and flags, mode/cone/speed readiness, two-lane entry state,
-diagnostic lane width, center bias, steering, speed, and an entry
-block bitmask. The bitmask is `1=disabled`, `2=mode`, `4=cone`, `8=straight`,
-`16=speed`, and `32=no confirmed vehicle`. The main tuning launch arguments are
-`overtake_min_points`, `overtake_confirm_scans`,
-`overtake_wall_analysis_forward_max`,
-`overtake_wall_analysis_lateral_limit`, `overtake_vehicle_max_span`,
-`overtake_wall_reject_span`, `overtake_brake_speed`, `overtake_drive_speed`,
-and `overtake_min_entry_speed`. The retained center-bias, steering-angle, and
-lane-width thresholds are diagnostic references only.
-
-## Keyboard pause/resume
-
-Run the main driving launch in one terminal. In a second interactive terminal,
-start the keyboard safety node:
+두 번째 대화형 터미널에서 키보드 안전 제어를 실행합니다.
 
 ```bash
 source ~/xycar_ws/install/setup.bash
 ros2 run final_drive keyboard_stop
 ```
 
-The keyboard node always starts in `STOP`. Press `SPACE` to run, and press
-`SPACE` again to stop. `S` forces stop, `R` requests run, and `Q` sends stop
-before exiting. Keep this terminal focused while driving. If its heartbeat is
-lost for 0.5 seconds, `drive_supervisor` stops the vehicle and requires a new
-stop-then-run sequence before motion can resume. The command and authoritative
-state topics are `/final_drive/manual_stop` and
-`/final_drive/manual_stop_state`.
+| 키 | 동작 |
+| --- | --- |
+| `SPACE` | STOP/RUN 전환 |
+| `S` | 정지 |
+| `R` | 주행 요청 |
+| `Q` | 정지 명령 후 키보드 노드 종료 |
 
-Keyboard control is required by the main launch by default, so the vehicle
-cannot move until the keyboard node has sent its initial `STOP` handshake and
-the operator presses `SPACE`. For an intentional non-driving bench test without
-the keyboard node, pass `require_keyboard_control:=false`.
+키보드 노드는 STOP 상태로 시작합니다. 초기 STOP 신호와 RUN 요청, 최신 센서 입력, 일반 녹색 신호 3프레임 확인이 모두 충족되어야 출발합니다. 키보드 터미널에 포커스를 유지하세요. heartbeat가 0.5초 끊기면 정지하며, 다시 STOP→RUN 순서로 전환해야 합니다.
 
-The launch also starts the traffic vision node built inside `final_drive`.
-Traffic-light detection uses `Y=0..239` of the default 640x480 image. Pixels at
-`Y>=240` are masked and any box crossing that boundary is rejected. With the
-70-percent horizontal ROI, the active signal area is `x=96..543`, `y=0..239`.
-The checkerboard implementation is preserved in
-`final_drive_vision/checkerboard_detector.py`, but `enable_checkerboard` is
-`false` in the integrated launch. Therefore the live node does not create the
-detector, run its image calculations, or publish `/checkerboard_detected`.
-Offline checkerboard tools remain available for later use.
-`drive_supervisor` uses a safety-asymmetric confirmation rule. Two consecutive
-structured red (`1`) or yellow (`2`) detections latch a full stop in both
-CAMERA and CONE modes. Green (`3`) and green+left (`4`) still require three
-consecutive frames before they release that latch and keep the selected driver
-going straight; left-turn steering is intentionally not implemented yet. State
-`0` resets an unfinished green confirmation but cannot release a confirmed
-stop. This rejects a one-frame false red while preventing a brief false green
-from restarting the vehicle. The confirmed state is available on
-`/final_drive/traffic_state`.
+통합 런치에서는 `drive_supervisor`만 최종 `/xycar_motor`를 발행합니다. `camera_drive`는 `/final_drive/camera_cmd`를 만들고, `cone_drive`의 출력은 `/final_drive/cone_cmd`로 remap됩니다. 감독기는 선택된 주행 명령에 신호등·키보드·timeout 정지를 우선 적용합니다.
 
-For safety, the supervisor also stops if `/traffic_light_state` has not arrived
-for 0.75 seconds. At startup, the vehicle remains stopped through `NONE`, red,
-yellow, and green+left states. Only three consecutive plain-green (`3`) frames
-release the one-time startup latch. This prevents the detector's early `NONE`
-frames or the first unconfirmed red frame from allowing a brief launch. After
-that first release, the normal two-frame red/yellow stop and three-frame green
-restart rules apply. Set `require_green_to_start:=false` only for an intentional
-bench test that does not begin at the traffic light. Set
-`require_traffic_for_motion:=false` only when intentionally testing without the
-traffic detector.
+## 최종 파라미터 기준
 
-The vehicle starts in `CAMERA` mode. `drive_supervisor` only recognizes a cone
-entrance when shape-validated objects are visible on both sides at the same
-forward position. Their width must be 0.70--0.98 m, each object must lie near an
-expected boundary, and the pair center must remain close to the vehicle center.
-Same-side rows never cause pre-deceleration or a mode change. A valid bilateral
-gate caps camera-mode speed at 8.0; `CONE` is selected only after the cone node
-also reports reliable tracked lanes on both sides. The last valid bilateral
-gate is remembered for 0.80 seconds (`cone_bilateral_hold_sec`) so the cone
-tracker has time to complete its multi-scan confirmation. One-sided detections
-do not refresh this memory.
+대회 당일 설정은 [`final_drive.launch.py`](launch/final_drive.launch.py)입니다. 별도 단독 런치와 노드 내부 기본값은 다를 수 있으므로, 최종값은 통합 런치와 해당 노드의 파라미터 처리를 함께 확인합니다. 속도 값은 차량 명령값이며 m/s가 아닙니다.
 
-The cone node publishes `TRACK`, `RECOVERY`, or `STOP` as compact numeric state
-on `/final_drive/cone_lane_status` (`1=one-side track`, `2=both-side track`,
-`3=recovery`, `0=stop`). Brief
-occlusions remain under cone recovery; once that recovery declares `STOP`, the
-supervisor returns to `CAMERA` without waiting for the cone speed ramp to reach
-zero. Multiple cone sections are enabled by default so the same entrance can be
-used again on every lap. The one-second post-exit cooldown only suppresses
-immediate end-of-section flicker; it does not lock later re-entry.
+| 항목 | 통합 실행값 |
+| --- | --- |
+| 카메라 직선 속도 / 곡선 최소 속도 | `23.0` / `10.0` |
+| 라바콘 기본 속도 / 곡선 속도 | `11.0` / `8.5` |
+| 라바콘 접근 속도 상한 | `8.0` |
+| 추월 제동 / 회피 속도 | `-10.0`으로 0.5초 / `10.0` |
+| 추월 진입 최소 속도 | `17.0` |
+| 신호 정지 / 재출발 확인 | 빨강·노랑 2프레임 / 녹색 계열 3프레임 |
+| 주행 명령 / LiDAR / 신호등 timeout | `0.30` / `0.30` / `0.75`초 |
+| 디버그 창 | 기본 비활성화 |
 
-The supervisor also keeps the motor stopped until the first fresh `/scan`
-message arrives. This prevents the camera node from starting the vehicle while
-the LiDAR driver is still warming up. `/final_drive/cone_status` is published
-by the supervisor for logging (`0=none`, `1=approach`, `2=cone command active`).
+벽 분석 영역은 좌우 0.90 m, 차량 검출 영역은 좌우 0.40 m입니다. 전방 범위는 실행 시 둘 다 1.50 m가 적용됩니다. 벽 분석 런치 입력 `1.30`은 코드에서 차량 검출 범위 `1.50` 이상으로 보정됩니다.
 
-## Build and run on the vehicle
+## 개별 실행과 진단
 
-```bash
-cd ~/xycar_ws
-colcon build --symlink-install --packages-select final_drive
-source install/setup.bash
-ros2 launch final_drive final_drive.launch.py
-```
+| 실행 파일 | 용도와 주의사항 |
+| --- | --- |
+| `final_drive.launch.py` | 대회용 통합 실행 |
+| `camera_traffic_vision.launch.py` | 카메라와 최종 ONNX 신호등 인식만 실행. 모터 명령을 발행하지 않음 |
+| `traffic_vision.launch.py` | 기존 영상 토픽을 사용하는 초기 OpenCV 검출기 실행. 기본 모델 경로가 비어 있어 최종 ONNX 설정과 다름 |
+| `cone_drive.launch.py` | LiDAR·라바콘 노드만 실행. `/xycar_motor`를 직접 발행하며 감독기의 키보드·신호등 안전 제어를 거치지 않음 |
 
-To run the track without the separate space-bar controller while still waiting
-for the initial confirmed green light:
+차량에서 단독 라바콘 실행이나 센서 기록 재생을 할 때는 모터 구동을 분리한 상태에서 확인하세요. 단독 라바콘 런치와 통합 런치를 동시에 실행하면 모터 명령이 충돌할 수 있습니다.
 
-```bash
-ros2 launch final_drive final_drive.launch.py require_keyboard_control:=false
-```
-
-Traffic perception can still be run by itself from the same package:
+최종 신호등 모델만 확인하려면 다음을 사용합니다.
 
 ```bash
 ros2 launch final_drive camera_traffic_vision.launch.py
-ros2 launch final_drive cone_drive.launch.py
-ros2 run final_drive traffic_bag_viewer /path/to/Xytron
-ros2 run final_drive traffic_bag_evaluate /path/to/traffic_bags --stride 10
 ```
 
-## Preparing the recorded traffic-light dataset
-
-`traffic_dataset_prepare` converts the fifteen `traffic_red_*`,
-`traffic_yellow_*`, `traffic_green_*`, `traffic_leftgreen_*`, and
-`traffic_none_*` image bags into a five-class YOLO dataset. The supplied
-sequences use two checked signal-housing boxes per bag. Sparse optical flow
-propagates them over the approach, and smoothly blends the middle and near
-tracks so the foreground rail cannot pull the close-range box away from the
-signal. Only the per-sequence frame intervals reviewed in the original-quality
-viewer are exported. Earlier, later, or ambiguous frames are excluded rather
-than mislabeled as empty-background examples.
-
-Run this offline; it is not part of the driving launch:
+통합 실행 중 상태를 확인하는 명령입니다.
 
 ```bash
-source ~/xycar_ws/install/setup.bash
-ros2 run final_drive traffic_dataset_prepare \
-  /path/to/traffic_rosbag /path/to/traffic_dataset_v1 --stride 6
+ros2 topic echo /final_drive/mode
+ros2 topic echo /final_drive/traffic_state
+ros2 topic echo /final_drive/manual_stop_state
 ```
 
-The output contains `images/{train,val}`, `labels/{train,val}`, `data.yaml`,
-`anchors.json`, and `manifest.json`. Bags ending in `_01` or `_02` are training
-data, while `_03` bags are validation data. This bag-level split prevents
-nearly identical adjacent frames from appearing on both sides of validation.
-The five classes are `red`, `yellow`, `green`, `left_green`, and `off`.
+기록을 재생할 때는 필요한 센서 토픽만 선택하고, 기록된 모터·제어·상태 토픽이 실행 중인 노드와 중복 발행되지 않도록 해야 합니다. 통합 카메라 노드는 `/image_raw`를 사용하므로 압축 영상만 담긴 기록을 그대로 재생하는 것과는 구분해야 합니다.
 
-This command only prepares and labels the archived v1 experiment. The live
-node uses the separately trained v2 housing model described below.
+## 데이터 준비와 오프라인 도구
 
-### Recommended v2 housing detector
+이 도구들은 개발과 검증을 위해 보존한 것으로, 주행 런치에서는 실행되지 않습니다.
 
-The v1 experiment showed that YOLO can localize the four-lamp housing at the
-requested distance, but direct five-state classification confuses red with
-yellow and green with left-green. The recommended v2 profile therefore trains
-one `traffic_light` housing class. Lamp state is classified later inside the
-detected crop, where the four fixed lamp positions make HSV/brightness tests
-more reliable.
+| 도구 | 적용 대상 |
+| --- | --- |
+| `traffic_housing_dataset_prepare` | 최종 모델용 단일 `traffic_light` 외함 데이터셋 생성 |
+| `traffic_housing_color_visualize` | ONNX 검출 상자 또는 라벨 상자에 R/Y/L/G 슬롯 분류 결과 표시 |
+| `traffic_dataset_prepare` | 초기 5클래스 신호 상태 분류 실험의 데이터셋 생성 |
+| `traffic_bag_viewer` | 프레임 탐색과 초기 OpenCV 신호등·체크무늬 검출 확인 |
+| `traffic_bag_evaluate` | 초기 OpenCV 검출기의 상태 평가. 최종 ONNX 모델의 정확도 평가 도구가 아님 |
+| `lidar_cone_inspector.py` | LiDAR 라바콘 분석 보조 도구 |
 
-Build the v2 dataset with confirmed empty frames from the signal sequences and
-the reviewed `run_04_cone` driving bag:
+최종 외함 데이터셋을 만드는 예시입니다. `/path/to/...`는 로컬 데이터 경로로 바꿉니다.
 
 ```bash
 ros2 run final_drive traffic_housing_dataset_prepare \
@@ -217,23 +111,9 @@ ros2 run final_drive traffic_housing_dataset_prepare \
   --driving-background-bag /path/to/rosbag/run_04_cone
 ```
 
-The supplied configuration exports 291 positive signal frames and 74
-empty-label backgrounds. The backgrounds include cones, a stopped vehicle,
-walls, ceiling lights, rails, corners, and frames after the signal has fully
-left the image. The original five-state dataset and model remain separate.
+기본 규칙은 `_01`, `_02` 시퀀스를 학습용, `_03`을 검증용으로 나눕니다. 인접 프레임이 양쪽에 섞이지 않도록 시퀀스 단위로 분리합니다.
 
-The live traffic node now uses the installed
-`models/traffic_housing_v2_best.onnx` detector followed by the second-stage
-classifier in
-`final_drive_vision/housing_classifier.py`. It divides a YOLO housing box into
-the fixed `R/Y/L/G` order and measures the brightest 20 percent of each lamp
-disk. Illuminated LEDs are clipped nearly white by this camera, so slot
-brightness is the primary signal; hue is not used as the primary decision.
-The current threshold (`V >= 240`) classified all 221 training crops and all 70
-YOLO validation crops correctly. The supervisor's two-frame red/yellow rule is
-still required because reflections can create an isolated bright slot.
-
-To inspect individual YOLO predictions and their four-slot decisions:
+추출한 이미지에 최종 모델과 슬롯 분류를 적용하는 예시입니다.
 
 ```bash
 ros2 run final_drive traffic_housing_color_visualize \
@@ -243,56 +123,22 @@ ros2 run final_drive traffic_housing_color_visualize \
   traffic_red_03_000102 traffic_yellow_03_000090
 ```
 
-The model is a fixed-size legacy-export ONNX (`imgsz=640`, `opset=12`, no
-embedded NMS). The legacy TorchScript export is intentional: ONNX graphs from
-the PyTorch 2.11 dynamo exporter do not load in the vehicle's OpenCV DNN. At
-startup the traffic node loads the installed model and fails closed if OpenCV
-cannot parse it. The image subscription keeps only the newest frame so slow
-CPU inference cannot accumulate an old-frame queue and delay a red decision.
+모델 입출력과 해시는 [모델 문서](models/README.md)에 정리했습니다. 체크무늬 검출 코드와 초기 OpenCV 검출기는 개발 이력으로 보존하며, 대회 통합 런치의 신호등 판단에는 최종 외함 모델을 사용합니다.
 
-The default stop/go confirmations are two and three consecutive frames, and all
-debug windows are disabled. `traffic_confirm_frames` only changes the green
-release threshold. For a faster two-frame release, or to explicitly enable the
-traffic debug window, use:
+## 테스트
+
+ROS 2 차량 환경에서 빌드 후 실행합니다.
 
 ```bash
-ros2 launch final_drive final_drive.launch.py \
-  traffic_confirm_frames:=2 traffic_debug:=true
+cd ~/xycar_ws
+colcon test --packages-select final_drive
+colcon test-result --verbose
 ```
 
-Watch the selected mode:
+Python/OpenCV 기능만 검사하려면 NumPy·OpenCV·pytest가 설치된 환경에서 이 패키지 디렉터리로 이동해 실행합니다.
 
 ```bash
-ros2 topic echo /final_drive/mode
-ros2 topic echo /traffic_light_state
-ros2 topic echo /final_drive/traffic_state
+python3 -m pytest test -q
 ```
 
-For rosbag playback, do not start the physical sensors. If the bag contains a
-recorded `/xycar_motor` topic, remap it so it cannot compete with the supervisor:
-
-```bash
-ros2 launch final_drive final_drive.launch.py start_camera:=false start_lidar:=false
-ros2 bag play <bag-folder> --remap /xycar_motor:=/recorded_xycar_motor
-```
-
-If the bag already contains `/traffic_light_state`, also pass
-`start_traffic_vision:=false` so the recorded and live detector topics do not
-compete. If the bag only contains `/image_raw`, leave traffic vision enabled.
-
-For the next transition test, record the decision inputs, the compressed camera
-image needed to diagnose traffic-light misses, and the final output:
-
-```bash
-ros2 bag record -o run_03_control /scan /image_raw/compressed /xycar_motor \
-  /final_drive/camera_cmd /final_drive/cone_cmd \
-  /final_drive/camera_lane_state /final_drive/overtake_state \
-  /final_drive/cone_lane_status \
-  /traffic_light_state /final_drive/traffic_state \
-  /final_drive/cone_status /final_drive/mode \
-  /final_drive/manual_stop /final_drive/manual_stop_state
-```
-
-These internal topics make the exact detection, pre-deceleration, and handoff
-times directly measurable in the next bag. Camera lane state is
-`[state,left_x,right_x,center_x,width]`, where `0=not found` and `1=accepted`.
+테스트 범위는 이미지 메시지 디코딩, ROI, 신호 필터, YOLO 출력 형상 처리, 슬롯 분류, 데이터셋 규칙입니다. C++ 노드 빌드와 실제 주행·추론 성능 검증은 별도 ROS 2·차량 환경에서 진행해야 합니다.

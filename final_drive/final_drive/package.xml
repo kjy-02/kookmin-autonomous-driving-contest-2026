@@ -4,7 +4,7 @@
   <name>final_drive</name>
   <version>0.2.0</version>
   <description>Unified camera, cone, traffic-light, and motor-supervisor driving package</description>
-  <maintainer email="user@todo.todo">user</maintainer>
+  <maintainer email="khh020712@naver.com">김재윤</maintainer>
   <license>MIT</license>
   <license>Apache-2.0</license>
 
